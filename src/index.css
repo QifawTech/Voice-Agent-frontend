@@ -1,0 +1,303 @@
+@import "tailwindcss";
+
+/* ──────────────────────────────────────────────────────────────
+   Design tokens
+   ────────────────────────────────────────────────────────────── */
+@theme {
+  /* "Signal" — a voice-operations console. Space Grotesk carries the
+     instrument/display voice (headings + numeric readouts); Inter is the
+     neutral body/UI face. Mono stays a system fallback for raw IDs/code. */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Space Grotesk", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, monospace;
+
+  /* Surfaces — light minimal. A near-white page with pure-white cards so
+     content sits on a calm neutral ground; the teal accent is the only
+     chromatic voice. Cards are the LIGHTEST layer here (inverse of dark). */
+  --color-bg: #fafafa;
+  --color-bg-subtle: #f4f4f5;
+  --color-bg-card: #ffffff;
+  --color-bg-card-hover: #fafafa;
+  --color-bg-hover: #f4f4f5;
+  --color-bg-elevated: #ffffff;
+
+  --color-border: #e4e4e7;
+  --color-border-light: #d4d4d8;
+  --color-border-strong: #a1a1aa;
+
+  --color-text: #18181b;
+  --color-text-muted: #52525b;
+  --color-text-dim: #71717a;
+
+  /* Signal teal, light-adapted. On light the accent must be DARK enough for
+     white button text — teal-700 clears 4.5:1 (≈5.4), teal-600 does not.
+     on-accent is white (inverse of the dark theme). */
+  --color-accent: #0f766e;
+  --color-accent-hover: #115e59;
+  --color-accent-light: #0f766e;
+  --color-accent-dim: #134e4a;
+  --color-accent-glow: rgba(15, 118, 110, 0.16);
+  --color-on-accent: #ffffff;
+
+  /* Semantic — -600/-700 shades so colored text clears contrast on white;
+     each is used as text on its own 10% tint. Red is the destructive signal. */
+  --color-success: #15803d;
+  --color-warning: #b45309;
+  --color-danger: #dc2626;
+  --color-info: #2563eb;
+
+  /* Chart series — fixed categorical order, stepped for a WHITE surface.
+     teal → amber → indigo: mutually distinct in hue and distinct from the
+     semantic greens/reds. Assign in order; never cycle, never recolour by
+     rank. NOTE: re-run the set's CVD/ΔE validation before production — stepped
+     for white but not yet re-certified as a set. */
+  --color-chart-1: #0d9488;
+  --color-chart-2: #d97706;
+  --color-chart-3: #4f46e5;
+
+  /* Chart chrome — recessive by design (light). */
+  --color-grid: #e4e4e7;
+  --color-axis: #a1a1aa;
+
+  /* A radius scale that encodes hierarchy instead of one value on
+     everything: large containers > cards > controls > chips. */
+  --radius-lg: 16px;
+  --radius-card: 12px;
+  --radius-ctl: 9px;
+  --radius-chip: 7px;
+
+  /* On light, depth comes from a soft gray shadow + border rather than the
+     dark theme's top-highlight. shadow-pop stays for things that truly float. */
+  --shadow-card: 0 1px 2px rgba(24, 24, 27, 0.04), 0 1px 3px rgba(24, 24, 27, 0.06);
+  --shadow-pop: 0 12px 32px -8px rgba(24, 24, 27, 0.16);
+
+  --animate-fade-up: fade-up 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes shimmer {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Base
+   NOTE: every rule below MUST stay inside `@layer base`. Tailwind v4
+   emits utilities into `@layer utilities`, and unlayered CSS outranks
+   any layered CSS at any specificity — so an unlayered reset such as
+   `* { padding: 0 }` here silently defeats every padding and margin
+   utility in the app. This is what flattened the original dashboard.
+   ────────────────────────────────────────────────────────────── */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Headings speak in the display face — Space Grotesk's mechanical,
+     slightly condensed letterforms give the console an instrument voice
+     the body text doesn't. Tight tracking reads as "designed" at size. */
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+
+  ::selection {
+    background: rgba(15, 118, 110, 0.16);
+    color: var(--color-text);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border-light);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-border-strong);
+    background-clip: content-box;
+  }
+
+  input,
+  select,
+  textarea {
+    background-color: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
+    border-radius: var(--radius-ctl);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  }
+  input:hover,
+  select:hover,
+  textarea:hover {
+    border-color: var(--color-border-light);
+  }
+  input:focus,
+  select:focus,
+  textarea:focus {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px var(--color-accent-glow);
+    outline: none;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-text-dim);
+    opacity: 1;
+  }
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 40px var(--color-bg-card) inset !important;
+    -webkit-text-fill-color: var(--color-text) !important;
+    caret-color: var(--color-text);
+    transition: background-color 5000s ease-in-out 0s;
+  }
+
+  select {
+    appearance: none;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.7rem center;
+    padding-right: 2rem;
+  }
+  option {
+    background-color: var(--color-bg-elevated);
+    color: var(--color-text);
+  }
+
+  button {
+    font-family: inherit;
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  table {
+    border-collapse: collapse;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Utilities
+   ────────────────────────────────────────────────────────────── */
+@utility tabular {
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+/* Hairline top highlight — the cheapest way to make a flat dark card
+   read as a physical surface rather than a painted rectangle. */
+@utility sheen {
+  position: relative;
+  isolation: isolate;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: 1px;
+    border-radius: inherit;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.09) 28%,
+      rgba(255, 255, 255, 0.09) 72%,
+      transparent
+    );
+    pointer-events: none;
+  }
+}
+
+/* Masked grid — sits behind the app shell so large empty regions
+   have texture instead of reading as a dead black void. */
+@utility grid-bg {
+  background-image: linear-gradient(var(--color-border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-border) 1px, transparent 1px);
+  background-size: 56px 56px;
+  background-position: center;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 20%, transparent 75%);
+}
+
+/* Live equalizer — the one place motion is allowed to run on its own.
+   It stands for the agent "listening," so it earns continuous motion the
+   way a VU meter does. Bars collapse to a flat trace under reduced motion. */
+@keyframes eq {
+  0%,
+  100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@utility eq-bar {
+  width: 3px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  transform-origin: bottom;
+  animation: eq 1.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
