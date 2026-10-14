@@ -45,5 +45,7 @@ coverage/
 # TypeScript
 *.tsbuildinfo
 
-# Markdown docs
+# Markdown docs (ignored by default) — but keep the docs/ folder tracked
 *.md
+!docs/
+!docs/**/*.md
