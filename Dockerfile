@@ -1,21 +1,26 @@
-# Stage 1: Node.js payanpaduthi React code-ai build seigirom
-FROM node:18-alpine AS build
+# Stage 1: Build React SPA with Node 20 LTS
+FROM node:20-alpine AS build
 WORKDIR /app
 
-# Packages-ai install seigirom
+# Packages install seigirom (npm ci uses package-lock.json strictly)
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
-# Meethi code-ai copy seithu build seigirom
+# Source code copy seigirom
 COPY . .
+
+# Build argument for backend API URL (optional)
+ARG VITE_API_URL=""
+ENV VITE_API_URL=$VITE_API_URL
+
 RUN npm run build
 
-# Stage 2: Build aana files-ai Nginx vazhiyaaga web-il kaattugirom
+# Stage 2: Serve via Nginx
 FROM nginx:alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 
-# Frontend 80 port-il run aagum
-EXPOSE 80
+# SPA Routing-kaga custom nginx config (prevents 404 on page refresh)
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Nginx server-ai start seigirom
+EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
