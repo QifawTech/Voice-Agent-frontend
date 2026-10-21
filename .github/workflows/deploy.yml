@@ -31,7 +31,10 @@ jobs:
           ECR_REPOSITORY: voice-agent-frontend
           IMAGE_TAG: latest
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          # VITE_API_URL is baked in at BUILD time (Vite env). It points the browser at the
+          # backend's Elastic IP:8000. LiveKit URL is NOT set here — the browser gets it from
+          # the backend token response (LIVEKIT_PUBLIC_URL).
+          docker build --build-arg VITE_API_URL=http://15.207.137.4:8000 -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
   deploy:
