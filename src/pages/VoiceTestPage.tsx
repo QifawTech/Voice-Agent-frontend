@@ -15,12 +15,15 @@ import { Card, CardHeader, CardBody } from "@/components/shared/Card";
 import SignalOrb, { type OrbState } from "@/components/shared/SignalOrb";
 import { Skeleton } from "@/components/shared/Skeleton";
 import { LANGUAGES } from "@/lib/constants";
+import { voicesForLanguage, DEFAULT_VOICE_BY_LANGUAGE } from "@/lib/voices";
 import { cn } from "@/lib/utils";
 
 export default function VoiceTestPage() {
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [selectedTenant, setSelectedTenant] = useState("");
   const [language, setLanguage] = useState("english");
+  const [voice, setVoice] = useState(DEFAULT_VOICE_BY_LANGUAGE["english"] ?? "");
+  const [pace, setPace] = useState(1.0);
   const [restaurantId, setRestaurantId] = useState("");
   const [connectionState, setConnectionState] = useState<ConnectionState>(
     ConnectionState.Disconnected,
@@ -109,6 +112,8 @@ export default function VoiceTestPage() {
       const tokenRes = await getLiveKitToken(tenant.id, tenant.widget_api_key || "", {
         participant_name: "dashboard-tester",
         language,
+        voice: voice || undefined,
+        pace,
         restaurant_id: restaurantId || undefined,
       });
 
@@ -170,7 +175,7 @@ export default function VoiceTestPage() {
       setError(err instanceof Error ? err.message : "Connection failed.");
       setConnectionState(ConnectionState.Disconnected);
     }
-  }, [selectedTenant, tenants, language, restaurantId, upsertTranscript]);
+  }, [selectedTenant, tenants, language, voice, pace, restaurantId, upsertTranscript]);
 
   const disconnect = useCallback(() => {
     roomRef.current?.disconnect();
@@ -260,7 +265,16 @@ export default function VoiceTestPage() {
                 <span className="mb-1.5 block text-xs font-medium text-text-muted">Language</span>
                 <select
                   value={language}
-                  onChange={(e) => setLanguage(e.target.value)}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setLanguage(next);
+                    // Keep the voice valid for the new language.
+                    setVoice(
+                      voicesForLanguage(next)[0]?.id ??
+                        DEFAULT_VOICE_BY_LANGUAGE[next] ??
+                        "",
+                    );
+                  }}
                   disabled={isConnected}
                   className="h-10 w-full disabled:opacity-60"
                 >
@@ -270,6 +284,45 @@ export default function VoiceTestPage() {
                     </option>
                   ))}
                 </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium text-text-muted">Voice</span>
+                <select
+                  value={voice}
+                  onChange={(e) => setVoice(e.target.value)}
+                  disabled={isConnected || voicesForLanguage(language).length === 0}
+                  className="h-10 w-full disabled:opacity-60"
+                >
+                  {voicesForLanguage(language).map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.label}
+                      {v.gender ? ` (${v.gender === "female" ? "F" : "M"})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-1.5 flex items-center justify-between text-xs font-medium text-text-muted">
+                  <span>Pace (speed)</span>
+                  <span className="tabular text-text-dim">{pace.toFixed(2)}×</span>
+                </span>
+                <input
+                  type="range"
+                  min={0.5}
+                  max={2}
+                  step={0.05}
+                  value={pace}
+                  onChange={(e) => setPace(parseFloat(e.target.value))}
+                  disabled={isConnected}
+                  className="w-full disabled:opacity-60"
+                />
+                <span className="mt-1 flex justify-between text-[10px] text-text-dim">
+                  <span>Slower</span>
+                  <span>Normal (1.0)</span>
+                  <span>Faster</span>
+                </span>
               </label>
 
               <label className="block">

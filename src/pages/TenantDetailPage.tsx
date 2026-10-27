@@ -10,8 +10,13 @@ import Badge from "@/components/shared/Badge";
 import Field from "@/components/shared/Field";
 import { Card, CardBody, CardHeader } from "@/components/shared/Card";
 import { cn } from "@/lib/utils";
+import { PROMPT_LANGUAGES } from "@/lib/constants";
+import { voicesForLanguage, DEFAULT_VOICE_BY_LANGUAGE } from "@/lib/voices";
 import SubTenantsTab from "@/components/SubTenantsTab";
 import ToolsTab from "@/components/ToolsTab";
+
+/** Per-language custom prompt stored in voice_config.prompts[<lang>]. */
+type LanguagePrompt = { greeting?: string; instructions?: string };
 
 type Tab = "settings" | "sub-tenants" | "voice" | "tools" | "api" | "widget";
 
@@ -26,6 +31,7 @@ export default function TenantDetailPage() {
   const [testResult, setTestResult] = useState<{ success: boolean; response_time_ms?: number; error?: string } | null>(null);
   const [embedCode, setEmbedCode] = useState("");
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
+  const [promptLang, setPromptLang] = useState<string>(PROMPT_LANGUAGES[0].code);
 
   useEffect(() => {
     if (!id) return;
@@ -88,6 +94,56 @@ export default function TenantDetailPage() {
 
   if (loading) return <LoadingSpinner />;
   if (!tenant) return <div className="text-center py-20 text-text-muted">Tenant not found</div>;
+
+  // Config saved on the tenant — the fallback when the form hasn't been touched.
+  const savedVoiceConfig = (tenant.voice_config ?? {}) as Record<string, unknown>;
+
+  // Voice config the form is currently editing (falls back to what's saved).
+  const voiceConfig = (form.voice_config ?? savedVoiceConfig) as Record<string, unknown>;
+  const prompts = (voiceConfig.prompts ?? {}) as Record<string, LanguagePrompt>;
+  const currentPrompt = prompts[promptLang] ?? {};
+
+  // The language the agent speaks on calls, and the voice chosen for it.
+  const defaultLanguage = (voiceConfig.language as string) || "english";
+  const savedVoices = (voiceConfig.voices ?? {}) as Record<string, string>;
+  const currentVoice =
+    savedVoices[defaultLanguage] || DEFAULT_VOICE_BY_LANGUAGE[defaultLanguage] || "";
+
+  function patchVoiceConfig(patch: Record<string, unknown>) {
+    setForm((f) => ({
+      ...f,
+      voice_config: { ...(f.voice_config ?? savedVoiceConfig), ...patch },
+    }));
+  }
+
+  function updatePromptField(field: keyof LanguagePrompt, value: string) {
+    setForm((f) => {
+      const base = (f.voice_config ?? savedVoiceConfig) as Record<string, unknown>;
+      const basePrompts = (base.prompts ?? {}) as Record<string, LanguagePrompt>;
+      return {
+        ...f,
+        voice_config: {
+          ...base,
+          prompts: {
+            ...basePrompts,
+            [promptLang]: { ...(basePrompts[promptLang] ?? {}), [field]: value },
+          },
+        },
+      };
+    });
+  }
+
+  // Store the chosen voice under its language, e.g. voices.english = "aura-luna-en".
+  function updateVoice(language: string, voiceId: string) {
+    setForm((f) => {
+      const base = (f.voice_config ?? savedVoiceConfig) as Record<string, unknown>;
+      const baseVoices = (base.voices ?? {}) as Record<string, string>;
+      return {
+        ...f,
+        voice_config: { ...base, voices: { ...baseVoices, [language]: voiceId } },
+      };
+    });
+  }
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "settings", label: "Settings" },
@@ -199,20 +255,52 @@ export default function TenantDetailPage() {
           <CardHeader title="Voice config" subtitle="How the agent greets and speaks to callers" />
           <CardBody className="pt-4">
             <form onSubmit={handleSave} className="space-y-4">
-              <Field label="Greeting message">
-                <textarea
-                  value={(form.voice_config as Record<string, string>)?.greeting || (tenant.voice_config as Record<string, string>)?.greeting || ""}
-                  onChange={(e) => setForm({ ...form, voice_config: { ...tenant.voice_config, greeting: e.target.value } })}
-                  placeholder="Welcome to our restaurant! How can I help you?"
-                  rows={3}
-                  className="w-full"
-                />
-              </Field>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <Field
+                  label="Default voice language"
+                  hint="The language the agent speaks on calls. Tamil uses the Sarvam voice."
+                >
+                  <select
+                    value={(voiceConfig.language as string) || "english"}
+                    onChange={(e) => patchVoiceConfig({ language: e.target.value })}
+                    className="w-full"
+                  >
+                    {PROMPT_LANGUAGES.map((l) => (
+                      <option key={l.code} value={l.code}>
+                        {l.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Voice" hint="The voice the agent speaks with on calls, for the default language.">
+                  <select
+                    value={currentVoice}
+                    onChange={(e) => updateVoice(defaultLanguage, e.target.value)}
+                    className="w-full"
+                  >
+                    {voicesForLanguage(defaultLanguage).map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.label}
+                        {v.gender ? ` (${v.gender === "female" ? "F" : "M"})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label={`Pace (${(Number(voiceConfig.pace) || 1).toFixed(2)}×)`} hint="Speaking speed: 1.0 normal, lower is slower, higher is faster.">
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={2}
+                    step={0.05}
+                    value={Number(voiceConfig.pace) || 1}
+                    onChange={(e) => patchVoiceConfig({ pace: parseFloat(e.target.value) })}
+                    className="w-full"
+                  />
+                </Field>
                 <Field label="Tone">
                   <select
-                    value={(form.voice_config as Record<string, string>)?.tone || (tenant.voice_config as Record<string, string>)?.tone || "friendly and professional"}
-                    onChange={(e) => setForm({ ...form, voice_config: { ...tenant.voice_config, tone: e.target.value } })}
+                    value={(voiceConfig.tone as string) || "friendly and professional"}
+                    onChange={(e) => patchVoiceConfig({ tone: e.target.value })}
                     className="w-full"
                   >
                     <option value="friendly and professional">Friendly & Professional</option>
@@ -221,6 +309,49 @@ export default function TenantDetailPage() {
                   </select>
                 </Field>
               </div>
+
+              <div className="rounded-lg border border-border/60 p-4 space-y-4">
+                <Field
+                  label="Edit greeting & prompt for"
+                  hint="Pick a language to write its greeting and system prompt. These are stored per language."
+                >
+                  <select
+                    value={promptLang}
+                    onChange={(e) => setPromptLang(e.target.value)}
+                    className="w-full sm:max-w-xs"
+                  >
+                    {PROMPT_LANGUAGES.map((l) => (
+                      <option key={l.code} value={l.code}>
+                        {l.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+
+                <Field label={`Greeting message (${promptLang})`} hint="The first thing the agent says when a caller connects.">
+                  <textarea
+                    value={currentPrompt.greeting || ""}
+                    onChange={(e) => updatePromptField("greeting", e.target.value)}
+                    placeholder="Welcome to our restaurant! How can I help you?"
+                    rows={3}
+                    className="w-full"
+                  />
+                </Field>
+
+                <Field
+                  label={`System prompt (${promptLang})`}
+                  hint="Describe the agent's personality and how it should talk in this language. The built-in ordering, menu-accuracy and voice rules are always kept on top of this, so ordering never breaks. Leave empty to use the default."
+                >
+                  <textarea
+                    value={currentPrompt.instructions || ""}
+                    onChange={(e) => updatePromptField("instructions", e.target.value)}
+                    placeholder="You are the voice assistant for our restaurant. Be warm and upbeat, use short friendly sentences, and suggest our bestsellers when callers are unsure..."
+                    rows={10}
+                    className="w-full font-mono text-sm"
+                  />
+                </Field>
+              </div>
+
               <Button type="submit" variant="primary" icon={<Save size={15} />} loading={saving}>
                 Save voice config
               </Button>
