@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Save, RefreshCw, Zap, Code, CheckCircle, XCircle, ArrowLeft, Check } from "lucide-react";
 import { getTenant, updateTenant, regenerateKey, testConnection, getEmbedCode } from "@/api/tenants";
@@ -11,7 +11,20 @@ import Field from "@/components/shared/Field";
 import { Card, CardBody, CardHeader } from "@/components/shared/Card";
 import { cn } from "@/lib/utils";
 import { PROMPT_LANGUAGES } from "@/lib/constants";
-import { voicesForLanguage, DEFAULT_VOICE_BY_LANGUAGE } from "@/lib/voices";
+import {
+  voicesForLanguage,
+  DEFAULT_VOICE_BY_LANGUAGE,
+  TTS_PROVIDERS,
+  ELEVENLABS_MODELS,
+  DEFAULT_ELEVENLABS_MODEL,
+} from "@/lib/voices";
+import {
+  listElevenLabsModels,
+  listElevenLabsVoices,
+  lookupElevenLabsVoice,
+  type ElevenLabsModel,
+  type ElevenLabsVoice,
+} from "@/api/elevenlabs";
 import SubTenantsTab from "@/components/SubTenantsTab";
 import ToolsTab from "@/components/ToolsTab";
 
@@ -33,6 +46,17 @@ export default function TenantDetailPage() {
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [promptLang, setPromptLang] = useState<string>(PROMPT_LANGUAGES[0].code);
 
+  // ElevenLabs picker data (loaded lazily when the provider is ElevenLabs).
+  const [elModels, setElModels] = useState<ElevenLabsModel[]>([]);
+  const [elVoices, setElVoices] = useState<ElevenLabsVoice[]>([]);
+  const [elLoaded, setElLoaded] = useState(false);
+  const [elError, setElError] = useState<string | null>(null);
+  // Voice-ID search box state.
+  const [voiceIdQuery, setVoiceIdQuery] = useState("");
+  const [voiceLookup, setVoiceLookup] = useState<
+    { status: "idle" | "loading" | "ok" | "error"; message?: string }
+  >({ status: "idle" });
+
   useEffect(() => {
     if (!id) return;
     getTenant(id)
@@ -43,6 +67,35 @@ export default function TenantDetailPage() {
       .catch(() => setMessage({ text: "Failed to load tenant", type: "error" }))
       .finally(() => setLoading(false));
   }, [id]);
+
+  // Fetch the ElevenLabs model + voice lists from the account (once). Called
+  // when the provider is (or becomes) ElevenLabs, so we don't hit the API for
+  // tenants that never use it.
+  const loadElevenLabsData = useCallback(async () => {
+    if (elLoaded) return;
+    setElError(null);
+    try {
+      const [models, voices] = await Promise.all([
+        listElevenLabsModels(),
+        listElevenLabsVoices(),
+      ]);
+      setElModels(models);
+      setElVoices(voices);
+      setElLoaded(true);
+    } catch (e) {
+      const detail =
+        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        "Could not load ElevenLabs voices/models. Check ELEVENLABS_API_KEY on the backend.";
+      setElError(detail);
+    }
+  }, [elLoaded]);
+
+  // Auto-load if the tenant already has ElevenLabs selected.
+  useEffect(() => {
+    const provider = (tenant?.voice_config as Record<string, unknown> | undefined)
+      ?.tts_provider;
+    if (provider === "elevenlabs") loadElevenLabsData();
+  }, [tenant, loadElevenLabsData]);
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
@@ -108,6 +161,38 @@ export default function TenantDetailPage() {
   const savedVoices = (voiceConfig.voices ?? {}) as Record<string, string>;
   const currentVoice =
     savedVoices[defaultLanguage] || DEFAULT_VOICE_BY_LANGUAGE[defaultLanguage] || "";
+
+  // TTS provider: "auto" (Deepgram/Sarvam by language) or "elevenlabs".
+  const ttsProvider = (voiceConfig.tts_provider as string) || "auto";
+  const elModel = (voiceConfig.elevenlabs_model as string) || DEFAULT_ELEVENLABS_MODEL;
+  const elVoiceId = (voiceConfig.elevenlabs_voice_id as string) || "";
+
+  // Model/voice option lists — prefer the live account lists, fall back to the
+  // static model list so the dropdown is never empty.
+  const modelOptions =
+    elModels.length > 0
+      ? elModels.map((m) => ({ id: m.model_id, label: m.name }))
+      : ELEVENLABS_MODELS;
+
+  async function handleVoiceIdSearch() {
+    const q = voiceIdQuery.trim();
+    if (!q) return;
+    setVoiceLookup({ status: "loading" });
+    try {
+      const v = await lookupElevenLabsVoice(q);
+      patchVoiceConfig({ elevenlabs_voice_id: v.voice_id });
+      // Make sure it shows in the dropdown even if it isn't an account voice.
+      setElVoices((prev) =>
+        prev.some((p) => p.voice_id === v.voice_id) ? prev : [v, ...prev],
+      );
+      setVoiceLookup({ status: "ok", message: `Found: ${v.name}` });
+    } catch (e) {
+      const detail =
+        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        "Voice ID not found.";
+      setVoiceLookup({ status: "error", message: detail });
+    }
+  }
 
   function patchVoiceConfig(patch: Record<string, unknown>) {
     setForm((f) => ({
@@ -257,6 +342,25 @@ export default function TenantDetailPage() {
             <form onSubmit={handleSave} className="space-y-4">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <Field
+                  label="TTS provider"
+                  hint="Auto routes by language (Deepgram/Sarvam). ElevenLabs speaks every language with one voice."
+                >
+                  <select
+                    value={ttsProvider}
+                    onChange={(e) => {
+                      patchVoiceConfig({ tts_provider: e.target.value });
+                      if (e.target.value === "elevenlabs") loadElevenLabsData();
+                    }}
+                    className="w-full"
+                  >
+                    {TTS_PROVIDERS.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field
                   label="Default voice language"
                   hint="The language the agent speaks on calls. Tamil uses the Sarvam voice."
                 >
@@ -272,20 +376,22 @@ export default function TenantDetailPage() {
                     ))}
                   </select>
                 </Field>
-                <Field label="Voice" hint="The voice the agent speaks with on calls, for the default language.">
-                  <select
-                    value={currentVoice}
-                    onChange={(e) => updateVoice(defaultLanguage, e.target.value)}
-                    className="w-full"
-                  >
-                    {voicesForLanguage(defaultLanguage).map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.label}
-                        {v.gender ? ` (${v.gender === "female" ? "F" : "M"})` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
+                {ttsProvider === "auto" && (
+                  <Field label="Voice" hint="The voice the agent speaks with on calls, for the default language.">
+                    <select
+                      value={currentVoice}
+                      onChange={(e) => updateVoice(defaultLanguage, e.target.value)}
+                      className="w-full"
+                    >
+                      {voicesForLanguage(defaultLanguage).map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.label}
+                          {v.gender ? ` (${v.gender === "female" ? "F" : "M"})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                )}
                 <Field label={`Pace (${(Number(voiceConfig.pace) || 1).toFixed(2)}×)`} hint="Speaking speed: 1.0 normal, lower is slower, higher is faster.">
                   <input
                     type="range"
@@ -309,6 +415,84 @@ export default function TenantDetailPage() {
                   </select>
                 </Field>
               </div>
+
+              {ttsProvider === "elevenlabs" && (
+                <div className="rounded-lg border border-border/60 p-4 space-y-4">
+                  <p className="text-sm font-medium text-text">ElevenLabs settings</p>
+                  {elError && (
+                    <p className="text-sm text-danger">{elError}</p>
+                  )}
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <Field label="Model" hint="ElevenLabs TTS model used for every language.">
+                      <select
+                        value={elModel}
+                        onChange={(e) => patchVoiceConfig({ elevenlabs_model: e.target.value })}
+                        className="w-full"
+                      >
+                        {modelOptions.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="Voice" hint="Pick from your account's voices, or search by ID below.">
+                      <select
+                        value={elVoiceId}
+                        onChange={(e) => patchVoiceConfig({ elevenlabs_voice_id: e.target.value })}
+                        className="w-full"
+                      >
+                        <option value="">— select a voice —</option>
+                        {elVoices.map((v) => (
+                          <option key={v.voice_id} value={v.voice_id}>
+                            {v.name}
+                            {v.category ? ` (${v.category})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                  </div>
+
+                  <Field
+                    label="Search by Voice ID"
+                    hint="Paste any ElevenLabs voice ID and look it up to use it (even if it's not in your account list)."
+                  >
+                    <div className="flex gap-2">
+                      <input
+                        value={voiceIdQuery}
+                        onChange={(e) => setVoiceIdQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleVoiceIdSearch();
+                          }
+                        }}
+                        placeholder="e.g. 21m00Tcm4TlvDq8ikWAM"
+                        className="w-full"
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={handleVoiceIdSearch}
+                        loading={voiceLookup.status === "loading"}
+                      >
+                        Look up
+                      </Button>
+                    </div>
+                  </Field>
+                  {voiceLookup.status === "ok" && (
+                    <p className="text-sm text-success">{voiceLookup.message}</p>
+                  )}
+                  {voiceLookup.status === "error" && (
+                    <p className="text-sm text-danger">{voiceLookup.message}</p>
+                  )}
+                  {elVoiceId && (
+                    <p className="text-xs text-text-muted">
+                      Selected voice ID: <span className="font-mono">{elVoiceId}</span>
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div className="rounded-lg border border-border/60 p-4 space-y-4">
                 <Field
