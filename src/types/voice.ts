@@ -2,9 +2,11 @@ export interface LiveKitTokenRequest {
   participant_name?: string;
   language?: string;
   tts_provider?: string;
+  /** TTS model id — only used for ElevenLabs (e.g. "eleven_multilingual_v2"). */
+  tts_model?: string;
   /** Agent voice to speak with: "female" (default) or "male". */
   voice_gender?: string;
-  /** Explicit TTS voice id (Sarvam speaker or Deepgram Aura model). */
+  /** Explicit TTS voice id (Sarvam speaker, Deepgram Aura model, or ElevenLabs voice id). */
   voice?: string;
   /** Speaking pace: 1.0 normal, <1 slower, >1 faster. Range 0.5–2.0. */
   pace?: number;

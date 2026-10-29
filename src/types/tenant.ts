@@ -51,6 +51,43 @@ export interface TenantListResponse {
   page_size: number;
 }
 
+/**
+ * How a tenant's opening greeting is produced.
+ * - "api"     → fetched live from the tenant's own API (e.g. menu size, best
+ *               sellers) via the get_greeting tool.
+ * - "default" → a static welcome the tenant typed, using their name.
+ */
+export type GreetingMode = "api" | "default";
+
+/** Stored under voice_config.greeting_setup. Absent = never set up. */
+export interface GreetingSetup {
+  mode: GreetingMode;
+  configured: boolean;
+}
+
+/**
+ * Read a completed greeting setup out of a tenant's voice_config, or null when
+ * the tenant has not finished setup yet (which is when the popup must appear).
+ */
+export function readGreetingSetup(
+  voiceConfig: Record<string, unknown> | null | undefined,
+): GreetingSetup | null {
+  const g = (voiceConfig as { greeting_setup?: unknown } | null | undefined)
+    ?.greeting_setup as Partial<GreetingSetup> | undefined;
+  if (g && (g.mode === "api" || g.mode === "default") && g.configured === true) {
+    return { mode: g.mode, configured: true };
+  }
+  return null;
+}
+
+/** The static welcome text currently stored (default-mode greeting). */
+export function readDefaultGreeting(
+  voiceConfig: Record<string, unknown> | null | undefined,
+): string {
+  const g = (voiceConfig as { greeting?: unknown } | null | undefined)?.greeting;
+  return typeof g === "string" ? g : "";
+}
+
 
 /**
  * One tenant of a multi-tenant customer.

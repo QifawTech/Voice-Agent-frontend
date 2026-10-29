@@ -6,7 +6,9 @@ import Header from "./Header";
 import LoadingSpinner from "@/components/shared/LoadingSpinner";
 import TenancyPromptModal from "@/components/TenancyPromptModal";
 import TenancyBanner from "@/components/TenancyBanner";
+import GreetingSetupModal from "@/components/GreetingSetupModal";
 import { useTenancy } from "@/hooks/useTenancy";
+import { useGreetingSetup } from "@/hooks/useGreetingSetup";
 
 export default function DashboardLayout() {
   const { token, user, userLoading, loadUser } = useAuthStore();
@@ -14,6 +16,9 @@ export default function DashboardLayout() {
   const { pathname } = useLocation();
   // Asked once across the whole app, not per page, and never blocking.
   const tenancy = useTenancy();
+  // Greeting setup is required. Gate it behind the tenancy question so the two
+  // modals never stack — tenancy first, then greeting.
+  const greeting = useGreetingSetup();
 
   useEffect(() => {
     if (token && !user && !userLoading) {
@@ -71,6 +76,13 @@ export default function DashboardLayout() {
         open={tenancy.shouldPrompt}
         onChoose={tenancy.choose}
         onDismiss={tenancy.dismiss}
+      />
+
+      <GreetingSetupModal
+        open={!tenancy.shouldPrompt && greeting.shouldPrompt}
+        tenantName={greeting.tenant?.name ?? "your business"}
+        currentWelcome={greeting.currentWelcome}
+        onSave={greeting.save}
       />
     </div>
   );

@@ -88,3 +88,36 @@ export const DEFAULT_VOICE_BY_LANGUAGE: Record<string, string> = {
 export function voicesForLanguage(language: string): Voice[] {
   return VOICES_BY_LANGUAGE[language?.toLowerCase()] ?? [];
 }
+
+// ──────────────────────────────────────────────────────────────
+// TTS provider selection
+// ──────────────────────────────────────────────────────────────
+
+/**
+ * Which TTS provider the agent uses.
+ *   - "auto": the built-in routing — Deepgram for English, Sarvam for the
+ *     Indian languages (the original behaviour).
+ *   - "elevenlabs": ElevenLabs for EVERY language (its models are multilingual),
+ *     using one voice id + model picked below.
+ */
+export type TtsProvider = "auto" | "elevenlabs";
+
+export const TTS_PROVIDERS: { id: TtsProvider; label: string }[] = [
+  { id: "auto", label: "Auto (Deepgram / Sarvam)" },
+  { id: "elevenlabs", label: "ElevenLabs" },
+];
+
+/**
+ * Static fallback list of ElevenLabs TTS models. The dashboard loads the live
+ * list from the account at runtime; this is only used until that resolves or if
+ * it fails. The `id` is sent to the backend verbatim.
+ */
+export const ELEVENLABS_MODELS: { id: string; label: string }[] = [
+  { id: "eleven_multilingual_v2", label: "Multilingual v2 — best quality" },
+  { id: "eleven_turbo_v2_5", label: "Turbo v2.5 — low latency" },
+  { id: "eleven_flash_v2_5", label: "Flash v2.5 — fastest" },
+  { id: "eleven_turbo_v2", label: "Turbo v2 — English" },
+  { id: "eleven_flash_v2", label: "Flash v2 — English" },
+];
+
+export const DEFAULT_ELEVENLABS_MODEL = "eleven_multilingual_v2";

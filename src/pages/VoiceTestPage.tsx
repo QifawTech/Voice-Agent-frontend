@@ -15,7 +15,20 @@ import { Card, CardHeader, CardBody } from "@/components/shared/Card";
 import SignalOrb, { type OrbState } from "@/components/shared/SignalOrb";
 import { Skeleton } from "@/components/shared/Skeleton";
 import { LANGUAGES } from "@/lib/constants";
-import { voicesForLanguage, DEFAULT_VOICE_BY_LANGUAGE } from "@/lib/voices";
+import {
+  voicesForLanguage,
+  DEFAULT_VOICE_BY_LANGUAGE,
+  TTS_PROVIDERS,
+  ELEVENLABS_MODELS,
+  DEFAULT_ELEVENLABS_MODEL,
+} from "@/lib/voices";
+import {
+  listElevenLabsModels,
+  listElevenLabsVoices,
+  lookupElevenLabsVoice,
+  type ElevenLabsModel,
+  type ElevenLabsVoice,
+} from "@/api/elevenlabs";
 import { cn } from "@/lib/utils";
 
 export default function VoiceTestPage() {
@@ -24,6 +37,21 @@ export default function VoiceTestPage() {
   const [language, setLanguage] = useState("english");
   const [voice, setVoice] = useState(DEFAULT_VOICE_BY_LANGUAGE["english"] ?? "");
   const [pace, setPace] = useState(1.0);
+
+  // TTS provider override for this test call: "auto" (Deepgram/Sarvam) or
+  // "elevenlabs" (any language, one voice + model picked below).
+  const [ttsProvider, setTtsProvider] = useState<string>("auto");
+  const [elModel, setElModel] = useState<string>(DEFAULT_ELEVENLABS_MODEL);
+  const [elVoiceId, setElVoiceId] = useState<string>("");
+  const [elModels, setElModels] = useState<ElevenLabsModel[]>([]);
+  const [elVoices, setElVoices] = useState<ElevenLabsVoice[]>([]);
+  const [elLoaded, setElLoaded] = useState(false);
+  const [elError, setElError] = useState<string | null>(null);
+  const [voiceIdQuery, setVoiceIdQuery] = useState("");
+  const [voiceLookup, setVoiceLookup] = useState<{
+    status: "idle" | "loading" | "ok" | "error";
+    message?: string;
+  }>({ status: "idle" });
   const [restaurantId, setRestaurantId] = useState("");
   const [connectionState, setConnectionState] = useState<ConnectionState>(
     ConnectionState.Disconnected,
@@ -56,6 +84,47 @@ export default function VoiceTestPage() {
   useEffect(() => {
     void loadTenants();
   }, [loadTenants]);
+
+  // Load the account's ElevenLabs models + voices once, when first needed.
+  const loadElevenLabsData = useCallback(async () => {
+    if (elLoaded) return;
+    setElError(null);
+    try {
+      const [models, voices] = await Promise.all([
+        listElevenLabsModels(),
+        listElevenLabsVoices(),
+      ]);
+      setElModels(models);
+      setElVoices(voices);
+      setElLoaded(true);
+    } catch (e) {
+      setElError(
+        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+          "Could not load ElevenLabs voices/models. Check ELEVENLABS_API_KEY on the backend.",
+      );
+    }
+  }, [elLoaded]);
+
+  const handleVoiceIdSearch = useCallback(async () => {
+    const q = voiceIdQuery.trim();
+    if (!q) return;
+    setVoiceLookup({ status: "loading" });
+    try {
+      const v = await lookupElevenLabsVoice(q);
+      setElVoiceId(v.voice_id);
+      setElVoices((prev) =>
+        prev.some((p) => p.voice_id === v.voice_id) ? prev : [v, ...prev],
+      );
+      setVoiceLookup({ status: "ok", message: `Found: ${v.name}` });
+    } catch (e) {
+      setVoiceLookup({
+        status: "error",
+        message:
+          (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+          "Voice ID not found.",
+      });
+    }
+  }, [voiceIdQuery]);
 
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -109,10 +178,15 @@ export default function VoiceTestPage() {
     setDebugEvents([]);
 
     try {
+      const isEleven = ttsProvider === "elevenlabs";
       const tokenRes = await getLiveKitToken(tenant.id, tenant.widget_api_key || "", {
         participant_name: "dashboard-tester",
         language,
-        voice: voice || undefined,
+        tts_provider: ttsProvider,
+        // ElevenLabs: one voice id + model for any language. Auto: the
+        // language-specific Sarvam/Deepgram voice.
+        tts_model: isEleven ? elModel : undefined,
+        voice: (isEleven ? elVoiceId : voice) || undefined,
         pace,
         restaurant_id: restaurantId || undefined,
       });
@@ -175,7 +249,18 @@ export default function VoiceTestPage() {
       setError(err instanceof Error ? err.message : "Connection failed.");
       setConnectionState(ConnectionState.Disconnected);
     }
-  }, [selectedTenant, tenants, language, voice, pace, restaurantId, upsertTranscript]);
+  }, [
+    selectedTenant,
+    tenants,
+    language,
+    voice,
+    pace,
+    restaurantId,
+    ttsProvider,
+    elModel,
+    elVoiceId,
+    upsertTranscript,
+  ]);
 
   const disconnect = useCallback(() => {
     roomRef.current?.disconnect();
@@ -262,6 +347,25 @@ export default function VoiceTestPage() {
               </label>
 
               <label className="block">
+                <span className="mb-1.5 block text-xs font-medium text-text-muted">TTS provider</span>
+                <select
+                  value={ttsProvider}
+                  onChange={(e) => {
+                    setTtsProvider(e.target.value);
+                    if (e.target.value === "elevenlabs") void loadElevenLabsData();
+                  }}
+                  disabled={isConnected}
+                  className="h-10 w-full disabled:opacity-60"
+                >
+                  {TTS_PROVIDERS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block">
                 <span className="mb-1.5 block text-xs font-medium text-text-muted">Language</span>
                 <select
                   value={language}
@@ -286,22 +390,103 @@ export default function VoiceTestPage() {
                 </select>
               </label>
 
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-medium text-text-muted">Voice</span>
-                <select
-                  value={voice}
-                  onChange={(e) => setVoice(e.target.value)}
-                  disabled={isConnected || voicesForLanguage(language).length === 0}
-                  className="h-10 w-full disabled:opacity-60"
-                >
-                  {voicesForLanguage(language).map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.label}
-                      {v.gender ? ` (${v.gender === "female" ? "F" : "M"})` : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {ttsProvider === "auto" && (
+                <label className="block">
+                  <span className="mb-1.5 block text-xs font-medium text-text-muted">Voice</span>
+                  <select
+                    value={voice}
+                    onChange={(e) => setVoice(e.target.value)}
+                    disabled={isConnected || voicesForLanguage(language).length === 0}
+                    className="h-10 w-full disabled:opacity-60"
+                  >
+                    {voicesForLanguage(language).map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.label}
+                        {v.gender ? ` (${v.gender === "female" ? "F" : "M"})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              {ttsProvider === "elevenlabs" && (
+                <div className="space-y-4 rounded-lg border border-border/60 p-3">
+                  {elError && <p className="text-xs text-danger">{elError}</p>}
+
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-medium text-text-muted">Model</span>
+                    <select
+                      value={elModel}
+                      onChange={(e) => setElModel(e.target.value)}
+                      disabled={isConnected}
+                      className="h-10 w-full disabled:opacity-60"
+                    >
+                      {(elModels.length > 0
+                        ? elModels.map((m) => ({ id: m.model_id, label: m.name }))
+                        : ELEVENLABS_MODELS
+                      ).map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-medium text-text-muted">Voice</span>
+                    <select
+                      value={elVoiceId}
+                      onChange={(e) => setElVoiceId(e.target.value)}
+                      disabled={isConnected}
+                      className="h-10 w-full disabled:opacity-60"
+                    >
+                      <option value="">— select a voice —</option>
+                      {elVoices.map((v) => (
+                        <option key={v.voice_id} value={v.voice_id}>
+                          {v.name}
+                          {v.category ? ` (${v.category})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-medium text-text-muted">
+                      Search by Voice ID
+                    </span>
+                    <div className="flex gap-2">
+                      <input
+                        value={voiceIdQuery}
+                        onChange={(e) => setVoiceIdQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            void handleVoiceIdSearch();
+                          }
+                        }}
+                        disabled={isConnected}
+                        placeholder="e.g. 21m00Tcm4TlvDq8ikWAM"
+                        className="h-10 w-full disabled:opacity-60"
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => void handleVoiceIdSearch()}
+                        loading={voiceLookup.status === "loading"}
+                        disabled={isConnected}
+                      >
+                        Look up
+                      </Button>
+                    </div>
+                    {voiceLookup.status === "ok" && (
+                      <span className="mt-1 block text-[11px] text-success">{voiceLookup.message}</span>
+                    )}
+                    {voiceLookup.status === "error" && (
+                      <span className="mt-1 block text-[11px] text-danger">{voiceLookup.message}</span>
+                    )}
+                  </label>
+                </div>
+              )}
 
               <label className="block">
                 <span className="mb-1.5 flex items-center justify-between text-xs font-medium text-text-muted">
